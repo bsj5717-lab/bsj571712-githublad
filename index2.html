@@ -1,0 +1,51 @@
+def get_route(s_lat, s_lon, e_lat, e_lon, google_blocked):
+    if not google_blocked:
+        try:
+            data = requests.get(
+                GOOGLE_DIRECTIONS_URL,
+                params={
+                    "origin": f"{s_lat},{s_lon}",
+                    "destination": f"{e_lat},{e_lon}",
+                    "mode": "driving",
+                    "key": GOOGLE_API_KEY,
+                },
+                timeout=20,
+            ).json()
+            if data.get("status") == "OK" and data.get("routes"):
+                leg = data["routes"][0]["legs"][0]
+                return (
+                    leg["distance"]["value"] / 1000.0,
+                    leg["duration"]["value"] / 60.0,
+                    decode_polyline(data["routes"][0]["overview_polyline"]["points"]),
+                    "Google",
+                    False,
+                )
+            if data.get("status") == "REQUEST_DENIED":
+                google_blocked = True
+        except Exception:
+            pass
+    try:
+        osrm = requests.get(
+            f"{OSRM_ROUTE_URL}/{s_lon},{s_lat};{e_lon},{e_lat}",
+            params={"overview": "full", "geometries": "geojson"},
+            timeout=20,
+        ).json()
+        if osrm.get("code") == "Ok" and osrm.get("routes"):
+            rt = osrm["routes"][0]
+            return (
+                rt["distance"] / 1000.0,
+                rt["duration"] / 60.0,
+                rt["geometry"]["coordinates"],
+                "OSRM대체",
+                google_blocked,
+            )
+    except Exception:
+        pass
+    d_km = haversine_km(s_lat, s_lon, e_lat, e_lon) * DETOUR_FACTOR
+    return (
+        d_km,
+        (d_km / AMBULANCE_SPEED) * 60.0,
+        [[s_lon, s_lat], [e_lon, e_lat]],
+        "직선보정",
+        google_blocked,
+    )
